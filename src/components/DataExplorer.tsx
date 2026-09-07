@@ -45,6 +45,71 @@ function newFilter(firstCol = ""): Filter {
   return { column: firstCol, op: "=", value: "" };
 }
 
+interface LinkPart {
+  href: string;
+  label: string;
+}
+
+/** Split text into plain chunks + link parts (http/https/www/email). */
+function linkify(text: string): (string | LinkPart)[] {
+  const re = /(https?:\/\/[^\s<>"')\]]+|www\.[^\s<>"')\]]+|[\w.+-]+@[\w-]+\.[\w.]+)/gi;
+  const out: (string | LinkPart)[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    let url = m[0];
+    const trail = url.match(/[.,;:!?)\]]+$/);
+    let suffix = "";
+    if (trail) {
+      suffix = trail[0];
+      url = url.slice(0, -suffix.length);
+    }
+    if (!url) {
+      last = m.index + m[0].length;
+      if (suffix) out.push(suffix);
+      continue;
+    }
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const isEmail =
+      !/^https?:\/\//i.test(url) && !/^www\./i.test(url) && url.includes("@");
+    out.push({
+      href: isEmail ? `mailto:${url}` : /^www\./i.test(url) ? `https://${url}` : url,
+      label: url,
+    });
+    if (suffix) out.push(suffix);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+/** Render text with any URLs/emails as real clickable links (open in new tab). */
+function LinkifiedText({ text }: { text: string }) {
+  const parts = linkify(text);
+  if (parts.length === 1 && typeof parts[0] === "string") return <>{text}</>;
+  return (
+    <>
+      {parts.map((p, i) =>
+        typeof p === "string" ? (
+          <span key={i}>{p}</span>
+        ) : (
+          <a
+            key={i}
+            href={p.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            title={p.href}
+            className="text-cyan-300 underline decoration-cyan-400/50 underline-offset-2 hover:text-cyan-100 hover:decoration-cyan-200"
+          >
+            {p.label}
+          </a>
+        )
+      )}
+    </>
+  );
+}
+
 export default function DataExplorer({
   table,
   onChanged,
@@ -792,10 +857,18 @@ function RowViewModal({
                                 : "hover:bg-white/[0.05]"
                           )}
                         >
-                          <button
+                          <div
+                            role="button"
+                            tabIndex={0}
                             onClick={() => copySingleLine(f.name, lines, i)}
-                            title={flashed ? "Copied!" : `Copy line ${i + 1}`}
-                            className="flex min-h-[30px] min-w-0 flex-1 items-start gap-2 rounded-md px-1 py-1 text-left"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                copySingleLine(f.name, lines, i);
+                              }
+                            }}
+                            title={flashed ? "Copied!" : `Copy line ${i + 1} — links open directly`}
+                            className="flex min-h-[30px] min-w-0 flex-1 cursor-pointer items-start gap-2 rounded-md px-1 py-1 text-left"
                           >
                             <span
                               className={cn(
@@ -809,7 +882,7 @@ function RowViewModal({
                               {ln === "" ? (
                                 <span className="text-white/25">↵ blank</span>
                               ) : (
-                                ln
+                                <LinkifiedText text={ln} />
                               )}
                             </span>
                             {flashed && (
@@ -817,7 +890,7 @@ function RowViewModal({
                                 Copied
                               </span>
                             )}
-                          </button>
+                          </div>
                           <button
                             onClick={() => toggleLine(f.name, i)}
                             title={on ? `Deselect line ${i + 1}` : `Select line ${i + 1} for bulk copy`}
@@ -842,11 +915,11 @@ function RowViewModal({
                       : "mt-1 break-words font-mono text-[12.5px] leading-relaxed text-white/85"
                   }
                 >
-                  {isNull ? (
-                    <span className="rounded bg-white/[0.07] px-1.5 py-0.5 text-[10.5px] italic text-white/35">NULL</span>
-                  ) : (
-                    cellText(v)
-                  )}
+                {isNull ? (
+                  <span className="rounded bg-white/[0.07] px-1.5 py-0.5 text-[10.5px] italic text-white/35">NULL</span>
+                ) : (
+                  <LinkifiedText text={cellText(v)} />
+                )}
                 </div>
               )}
             </div>
