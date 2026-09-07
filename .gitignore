@@ -32,6 +32,16 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# local sqlite / libsql data (never commit databases or their journals)
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+/data/*.db*
+/data/*.sqlite*
 
 # vercel
 .vercel
