@@ -146,7 +146,8 @@ export async function POST(req: Request, ctx: Ctx) {
 }
 
 // PATCH update rows
-// A) single: { rowid, data }  B) by pk: { pkColumn, pkValue, data }  C) bulk: { filters, data }
+// A) single: { rowid, data }  B) by pk: { pkColumn, pkValue, data }
+// C) mass edit ticked rows: { rowids: [], data }  D) bulk: { filters, data }
 export async function PATCH(req: Request, ctx: Ctx) {
   const g = await guard();
   if (g) return g;
@@ -155,6 +156,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const name = assertIdent(raw, "table");
     const body = (await req.json().catch(() => ({}))) as {
       rowid?: number | string;
+      rowids?: (number | string)[];
       pkColumn?: string;
       pkValue?: unknown;
       filters?: { column: string; op: string; value?: string }[];
@@ -195,7 +197,19 @@ export async function PATCH(req: Request, ctx: Ctx) {
       );
       return NextResponse.json({ ok: true, rowsAffected: res.rowsAffected });
     }
-    return err("Provide rowid, pkColumn+pkValue, or filters.", 400);
+    if (Array.isArray(body.rowids) && body.rowids.length > 0) {
+      const ids = body.rowids
+        .slice(0, 500)
+        .map(Number)
+        .filter((n) => Number.isFinite(n));
+      if (ids.length === 0) return err("No valid row ids.", 400);
+      const res = await db.execute(
+        `UPDATE ${quoteIdent(name)} SET ${setSql} WHERE rowid IN (${ids.map(() => "?").join(",")})`,
+        toArgs([...setArgs, ...ids])
+      );
+      return NextResponse.json({ ok: true, rowsAffected: res.rowsAffected });
+    }
+    return err("Provide rowid, rowids, pkColumn+pkValue, or filters.", 400);
   } catch (e) {
     return err(e, 400);
   }

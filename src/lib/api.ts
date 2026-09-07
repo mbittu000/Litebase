@@ -58,10 +58,10 @@ async function handle(res: Response) {
 
 export const api = {
   overview(): Promise<OverviewData> {
-    return fetch("/api/overview").then(handle);
+    return fetch("/api/overview", { cache: "no-store" }).then(handle);
   },
   schema(name: string): Promise<SchemaData> {
-    return fetch(`/api/tables/${encodeURIComponent(name)}`).then(handle);
+    return fetch(`/api/tables/${encodeURIComponent(name)}`, { cache: "no-store" }).then(handle);
   },
   rows(
     name: string,
@@ -81,7 +81,7 @@ export const api = {
     if (opts.sortDir) q.set("sortDir", opts.sortDir);
     if (opts.filters?.length) q.set("filters", JSON.stringify(opts.filters));
     if (opts.search) q.set("search", opts.search);
-    return fetch(`/api/tables/${encodeURIComponent(name)}/rows?${q}`).then(handle);
+    return fetch(`/api/tables/${encodeURIComponent(name)}/rows?${q}`, { cache: "no-store" }).then(handle);
   },
   async insert(name: string, data: Record<string, unknown>) {
     return fetch(`/api/tables/${encodeURIComponent(name)}/rows`, {
@@ -102,6 +102,13 @@ export const api = {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filters, data }),
+    }).then(handle);
+  },
+  async bulkUpdateByIds(name: string, rowids: (string | number)[], data: Record<string, unknown>) {
+    return fetch(`/api/tables/${encodeURIComponent(name)}/rows`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rowids, data }),
     }).then(handle);
   },
   async delRow(name: string, rowid: string | number) {

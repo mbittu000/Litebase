@@ -52,7 +52,7 @@ npm start
 | `GET` | `/api/overview` | stats + tables + row counts |
 | `GET/POST` | `/api/tables` | list / create (`{name, columns}` or `{sql}`) |
 | `GET/PATCH/DELETE` | `/api/tables/[name]` | schema / rename+truncate / drop |
-| `GET/POST/PATCH/DELETE` | `/api/tables/[name]/rows` | paged+filtered read / insert / update (rowid, pk, or filters) / delete |
+| `GET/POST/PATCH/DELETE` | `/api/tables/[name]/rows` | paged+filtered read / insert / update (rowid, pk, rowid-list, or filters) / delete |
 | `POST/DELETE` | `/api/tables/[name]/columns` | add / drop column |
 | `POST` | `/api/query` `{sql}` | raw SQL (select grid or rows-affected) |
 

@@ -137,6 +137,7 @@ export default function DataExplorer({
   const [rowModal, setRowModal] = useState<{ mode: "add" | "edit"; row?: Record<string, unknown> } | null>(null);
   const [viewRow, setViewRow] = useState<Record<string, unknown> | null>(null);
   const [bulkModal, setBulkModal] = useState(false);
+  const [massEditOpen, setMassEditOpen] = useState(false);
   const [confirmDel, setConfirmDel] = useState<{ label: string; run: () => Promise<void> } | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
@@ -310,9 +311,14 @@ export default function DataExplorer({
           </select>
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
             {selected.size > 0 && (
-              <Btn variant="danger" onClick={doDeleteSelected}>
-                <Trash2 size={14} /> Delete ({selected.size})
-              </Btn>
+              <>
+                <Btn variant="primary" onClick={() => setMassEditOpen(true)}>
+                  <Pencil size={14} /> Edit ({selected.size})
+                </Btn>
+                <Btn variant="danger" onClick={doDeleteSelected}>
+                  <Trash2 size={14} /> Delete ({selected.size})
+                </Btn>
+              </>
             )}
             {filters.length > 0 && (
               <Btn variant="soft" onClick={() => setBulkModal(true)}>
@@ -571,11 +577,13 @@ export default function DataExplorer({
         onDelete={(id) => confirmDeleteRow(id)}
       />
 
-      {/* bulk update modal */}
+      {/* bulk update modal (filter matches) */}
       <BulkUpdateModal
         open={bulkModal}
         columns={cols}
-        filterCount={filters.length}
+        title="Bulk update via filters"
+        subtitle={`Will UPDATE every row matching your ${filters.length} active filter(s). Only filled fields change.`}
+        applyLabel="Apply to matches"
         onClose={() => setBulkModal(false)}
         onApply={async (patch) => {
           setBusy(true);
@@ -586,7 +594,36 @@ export default function DataExplorer({
             await loadRows(page);
             onChanged();
           } catch (e) {
-            flash(e instanceof Error ? e.message : String(e));
+            const m = e instanceof Error ? e.message : String(e);
+            flash(m);
+            throw new Error(m);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        busy={busy}
+      />
+
+      {/* mass edit modal (ticked rows) */}
+      <BulkUpdateModal
+        open={massEditOpen}
+        columns={cols}
+        title={`Mass edit ${selected.size} selected row${selected.size === 1 ? "" : "s"}`}
+        subtitle="Same value lands on every ticked row. Only filled fields change — leave the rest empty."
+        applyLabel={`Apply to ${selected.size} row${selected.size === 1 ? "" : "s"}`}
+        onClose={() => setMassEditOpen(false)}
+        onApply={async (patch) => {
+          setBusy(true);
+          try {
+            const r = await api.bulkUpdateByIds(table, [...selected], patch) as { rowsAffected?: number };
+            flash(`Updated ${r.rowsAffected ?? 0} row(s)`);
+            setMassEditOpen(false);
+            await loadRows(page);
+            onChanged();
+          } catch (e) {
+            const m = e instanceof Error ? e.message : String(e);
+            flash(m);
+            throw new Error(m);
           } finally {
             setBusy(false);
           }
@@ -1051,31 +1088,54 @@ function RowFormModal({
 function BulkUpdateModal({
   open,
   columns,
-  filterCount,
+  title,
+  subtitle,
+  applyLabel,
   onClose,
   onApply,
   busy,
 }: {
   open: boolean;
   columns: SchemaData["columns"];
-  filterCount: number;
+  title: string;
+  subtitle: string;
+  applyLabel: string;
   onClose: () => void;
-  onApply: (patch: Record<string, unknown>) => void;
+  onApply: (patch: Record<string, unknown>) => Promise<void>;
   busy: boolean;
 }) {
   const [values, setValues] = useState<Record<string, string>>({});
+  const [err, setErr] = useState("");
   useEffect(() => {
-    if (open) setValues({});
+    if (open) {
+      setValues({});
+      setErr("");
+    }
   }, [open ]);
 
   const chosen = Object.entries(values).filter(([, v]) => v.trim() !== "");
+
+  async function submit() {
+    setErr("");
+    try {
+      await onApply(
+        Object.fromEntries(
+          chosen.map(([k, v]) => [k, v.trim() === "" ? null : v])
+        ) as Record<string, unknown>
+      );
+    } catch (e) {
+      // callers already flashed a toast — mirror it here so the
+      // failure is visible above the modal instead of hidden behind it
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title="Bulk update via filters"
-      subtitle={`Will UPDATE every row matching your ${filterCount} active filter(s). Only filled fields change.`}
+      title={title}
+      subtitle={subtitle}
     >
       <div className="flex max-h-[50vh] flex-col gap-2.5 overflow-auto pr-1">
         {columns.map((c) => (
@@ -1094,11 +1154,16 @@ function BulkUpdateModal({
         <span className="text-[12px] text-white/45">{chosen.length} field(s) set</span>
         <div className="flex gap-2">
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" disabled={busy || chosen.length === 0} onClick={() => onApply(Object.fromEntries(chosen.map(([k, v]) => [k, v.trim() === "" ? null : v])) as Record<string, unknown>)}>
-            {busy && <Spinner />} Apply to matches
+          <Btn variant="primary" disabled={busy || chosen.length === 0} onClick={submit}>
+            {busy && <Spinner />} {applyLabel}
           </Btn>
         </div>
       </div>
+      {err && (
+        <p className="mt-3 rounded-xl border border-red-400/25 bg-red-500/10 px-3 py-2 text-[13px] text-red-200">
+          {err}
+        </p>
+      )}
     </Modal>
   );
 }
