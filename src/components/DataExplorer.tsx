@@ -45,6 +45,65 @@ function newFilter(firstCol = ""): Filter {
   return { column: firstCol, op: "=", value: "" };
 }
 
+interface SavedFilterSet {
+  id: string;
+  name: string;
+  table: string;
+  filters: Filter[];
+  createdAt: number;
+}
+
+const SAVED_FILTERS_KEY = "litebase:saved-filters";
+
+function loadAllSavedFilters(): SavedFilterSet[] {
+  try {
+    const raw = localStorage.getItem(SAVED_FILTERS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as SavedFilterSet[];
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(
+      (s) =>
+        s &&
+        typeof s.id === "string" &&
+        typeof s.name === "string" &&
+        typeof s.table === "string" &&
+        Array.isArray(s.filters)
+    );
+  } catch {
+    return [];
+  }
+}
+
+function loadSavedFilters(table: string): SavedFilterSet[] {
+  return loadAllSavedFilters().filter((s) => s.table === table);
+}
+
+/** Date-like column? type-based (DATE/TIME) or naming convention (created_at, *_on, *date*, *time*…). */
+function isDateColumn(colName: string, colType?: string): boolean {
+  const t = (colType ?? "").toUpperCase();
+  if (t.includes("DATE") || t.includes("TIME")) return true;
+  const n = colName.toLowerCase();
+  return (
+    n === "date" ||
+    n === "dob" ||
+    n === "birthday" ||
+    n === "created" ||
+    n === "updated" ||
+    n.endsWith("_at") ||
+    n.endsWith("_on") ||
+    n.endsWith("_date") ||
+    n.includes("date") ||
+    n.includes("time")
+  );
+}
+
+/** Extract yyyy-mm-dd prefix for <input type="date"> (guarantees the required format). */
+function toDateInputValue(v?: string): string {
+  if (!v) return "";
+  const m = String(v).match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : "";
+}
+
 interface LinkPart {
   href: string;
   label: string;
@@ -132,6 +191,9 @@ export default function DataExplorer({
   const [search, setSearch] = useState("");
   const [searchDeb, setSearchDeb] = useState("");
   const [showFilters, setShowFilters] = useState(true);
+  const [savedSets, setSavedSets] = useState<SavedFilterSet[]>([]);
+  const [savedName, setSavedName] = useState("");
+  const [activeSavedId, setActiveSavedId] = useState("");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [rowModal, setRowModal] = useState<{ mode: "add" | "edit"; row?: Record<string, unknown> } | null>(null);
@@ -190,6 +252,13 @@ export default function DataExplorer({
     setSearchDeb("");
     setSelected(new Set());
     setViewRow(null);
+    setSavedName("");
+    setActiveSavedId("");
+    try {
+      setSavedSets(loadSavedFilters(table));
+    } catch {
+      setSavedSets([]);
+    }
     (async () => {
       setLoading(true);
       setErr("");
@@ -225,6 +294,81 @@ export default function DataExplorer({
     setFilters(next);
     setPage(1);
     loadRows(1, { filters: next });
+  }
+
+  function refreshSaved() {
+    try {
+      setSavedSets(loadSavedFilters(table));
+    } catch {
+      setSavedSets([]);
+    }
+  }
+
+  function persistAllSaved(all: SavedFilterSet[]) {
+    try {
+      localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(all));
+    } catch {
+      // storage full / private mode — non-fatal
+    }
+    refreshSaved();
+  }
+
+  function saveCurrentFilters() {
+    if (filters.length === 0) {
+      flash("Add at least one filter before saving");
+      return;
+    }
+    const name =
+      savedName.trim() ||
+      `Filters ${savedSets.length + 1} · ${new Date().toISOString().slice(0, 10)}`;
+    const entry: SavedFilterSet = {
+      id:
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name: name.slice(0, 80),
+      table,
+      filters: filters.map((f) => ({ ...f })),
+      createdAt: Date.now(),
+    };
+    const all = [...loadAllSavedFilters(), entry];
+    persistAllSaved(all);
+    setSavedName("");
+    setActiveSavedId(entry.id);
+    flash(`Saved "${entry.name}"`);
+  }
+
+  function applySaved(id: string) {
+    setActiveSavedId(id);
+    if (!id) return;
+    const found = savedSets.find((s) => s.id === id);
+    if (!found) return;
+    const next = found.filters.map((f) => ({ ...f }));
+    setFilters(next);
+    setPage(1);
+    loadRows(1, { filters: next });
+    flash(`Applied "${found.name}"`);
+  }
+
+  function updateSaved(id: string) {
+    if (!id) return;
+    if (filters.length === 0) {
+      flash("Add at least one filter before updating");
+      return;
+    }
+    const all = loadAllSavedFilters().map((s) =>
+      s.id === id ? { ...s, filters: filters.map((f) => ({ ...f })) } : s
+    );
+    persistAllSaved(all);
+    flash("Saved filter updated");
+  }
+
+  function deleteSaved(id: string) {
+    if (!id) return;
+    const all = loadAllSavedFilters().filter((s) => s.id !== id);
+    persistAllSaved(all);
+    setActiveSavedId("");
+    flash("Saved filter deleted");
   }
 
   function toggleSort(col: string) {
@@ -343,11 +487,67 @@ export default function DataExplorer({
               </span>
               <span className="text-[11px] text-white/30">— built from this table&apos;s columns</span>
               <button
-                onClick={() => setFilters([...filters, newFilter(cols[0]?.name ?? "")])}
+                onClick={() => {
+                  setFilters([...filters, newFilter(cols[0]?.name ?? "")]);
+                }}
                 className="ml-auto rounded-lg border border-violet-400/30 bg-violet-500/15 px-2 py-1 text-[11px] font-bold text-violet-200 hover:bg-violet-500/25"
               >
                 + Add filter
               </button>
+            </div>
+            {/* saved filters — name current set, re-apply later without retyping dates */}
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-white/[0.07] bg-black/20 px-2 py-1.5">
+              <select
+                value={activeSavedId}
+                onChange={(e) => applySaved(e.target.value)}
+                title={savedSets.length ? "Apply a saved filter set for this table" : "No saved filters for this table yet — set filters above, name them, hit Save"}
+                className="min-w-[150px] max-w-[220px] flex-1 rounded-lg border border-white/10 bg-black/50 px-2 py-1.5 text-[12px] text-white"
+              >
+                <option value="">
+                  {savedSets.length ? `Saved filters (${savedSets.length})…` : "No saved filters yet…"}
+                </option>
+                {savedSets.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} · {s.filters.length} filter{s.filters.length === 1 ? "" : "s"}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={savedName}
+                onChange={(e) => setSavedName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveCurrentFilters();
+                }}
+                placeholder="Name to save current…"
+                title="Name the current filter set (e.g. this week's dates), then hit Save"
+                className="min-w-[130px] flex-1 rounded-lg border border-white/10 bg-black/50 px-2 py-1.5 text-[12px] text-white placeholder:text-white/25"
+              />
+              <button
+                onClick={saveCurrentFilters}
+                disabled={filters.length === 0}
+                title="Save the current filters under this name"
+                className="rounded-lg border border-emerald-400/30 bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-200 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Save
+              </button>
+              {activeSavedId && (
+                <>
+                  <button
+                    onClick={() => updateSaved(activeSavedId)}
+                    title="Overwrite the selected saved set with the current filters"
+                    className="rounded-lg border border-white/10 px-2 py-1 text-[11px] font-bold text-white/60 hover:bg-white/10 hover:text-white"
+                  >
+                    Update
+                  </button>
+                  <button
+                    onClick={() => deleteSaved(activeSavedId)}
+                    title="Delete the selected saved set"
+                    className="rounded-lg border border-white/10 px-2 py-1 text-[11px] font-bold text-white/60 hover:bg-red-500/20 hover:text-red-200"
+                  >
+                    Delete
+                  </button>
+                </>
+              )}
             </div>
             {filters.length === 0 ? (
               <p className="rounded-lg border border-dashed border-white/10 px-3 py-3 text-center text-[12px] text-white/40">
@@ -355,7 +555,12 @@ export default function DataExplorer({
               </p>
             ) : (
               <div className="flex flex-col gap-1.5">
-                {filters.map((f, i) => (
+                {filters.map((f, i) => {
+                  const colType = cols.find((c) => c.name === f.column)?.type ?? "";
+                  const dateLike = isDateColumn(f.column, colType);
+                  const showValue = f.op !== "isNull" && f.op !== "isNotNull";
+                  const useDatePicker = dateLike && showValue && f.op !== "in";
+                  return (
                   <div key={i} className="flex flex-wrap items-center gap-1.5">
                     <select value={f.column} onChange={(e) => { const n = [...filters]; n[i] = { ...n[i], column: e.target.value }; applyFilters(n); }} className="min-w-[130px] rounded-lg border border-white/10 bg-black/50 px-2 py-1.5 font-mono text-[12px] text-cyan-200">
                       {cols.map((c) => (
@@ -367,7 +572,36 @@ export default function DataExplorer({
                         <option key={o.value} value={o.value}>{o.label}</option>
                       ))}
                     </select>
-                    {f.op !== "isNull" && f.op !== "isNotNull" && (
+                    {showValue && (
+                      useDatePicker ? (
+                        <span className="flex min-w-[140px] flex-1 items-center gap-1.5">
+                          <input
+                            type="date"
+                            value={toDateInputValue(f.value)}
+                            onChange={(e) => {
+                              const picked = e.target.value; // always yyyy-mm-dd
+                              const cur = String(f.value ?? "");
+                              // preserve a time suffix (e.g. " HH:MM:SS") when the column holds datetimes
+                              const suffix = cur.match(/^\d{4}-\d{2}-\d{2}(.+)$/)?.[1] ?? "";
+                              const n = [...filters];
+                              n[i] = { ...n[i], value: picked ? picked + suffix : "" };
+                              applyFilters(n);
+                            }}
+                            title="Pick a date — stored as yyyy-mm-dd"
+                            className="rounded-lg border border-white/10 bg-black/50 px-2 py-1.5 font-mono text-[12px] text-white [color-scheme:dark]"
+                          />
+                          <input
+                            value={f.value ?? ""}
+                            onChange={(e) => { const n = [...filters]; n[i] = { ...n[i], value: e.target.value }; setFilters(n); }}
+                            onKeyDown={(e) => { if (e.key === "Enter") loadRows(1, { filters }); }}
+                            onBlur={() => loadRows(1, { filters })}
+                            placeholder="yyyy-mm-dd"
+                            pattern="\d{4}-\d{2}-\d{2}.*"
+                            title="Date as yyyy-mm-dd (time suffix allowed for DATETIME, e.g. 2026-09-09 10:00:00). Tip: use contains with yyyy-mm-dd to match a whole day."
+                            className="min-w-[120px] flex-1 rounded-lg border border-white/10 bg-black/50 px-2.5 py-1.5 font-mono text-[12px] text-white placeholder:text-white/25"
+                          />
+                        </span>
+                      ) : (
                       <input
                         value={f.value ?? ""}
                         onChange={(e) => { const n = [...filters]; n[i] = { ...n[i], value: e.target.value }; setFilters(n); }}
@@ -376,17 +610,19 @@ export default function DataExplorer({
                         placeholder={f.op === "in" ? "a, b, c" : "value…"}
                         className="min-w-[140px] flex-1 rounded-lg border border-white/10 bg-black/50 px-2.5 py-1.5 font-mono text-[12px] text-white placeholder:text-white/25"
                       />
+                      )
                     )}
                     <button onClick={() => { const n = filters.filter((_, j) => j !== i); applyFilters(n); }} className="rounded-lg border border-white/10 p-1.5 text-white/50 hover:bg-red-500/20 hover:text-red-200" title="Remove filter">
                       <X size={13} />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   <Btn variant="soft" onClick={() => loadRows(1)}>
                     Apply
                   </Btn>
-                  <Btn onClick={() => { setFilters([]); setPage(1); loadRows(1, { filters: [] }); }}>
+                  <Btn onClick={() => { setFilters([]); setPage(1); setActiveSavedId(""); loadRows(1, { filters: [] }); }}>
                     Clear all
                   </Btn>
                   <Btn
