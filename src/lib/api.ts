@@ -185,6 +185,13 @@ export const api = {
       method: "DELETE",
     }).then(handle);
   },
+  async renameColumn(name: string, column: string, newName: string) {
+    return fetch(`/api/tables/${encodeURIComponent(name)}/columns`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "rename", column, newName }),
+    }).then(handle);
+  },
   async logout() {
     return fetch("/api/auth/logout", { method: "POST" }).then(handle);
   },

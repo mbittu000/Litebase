@@ -57,3 +57,28 @@ export async function DELETE(req: Request, ctx: Ctx) {
     return err(e, 400);
   }
 }
+
+// PATCH rename column { action: 'rename', column, newName } (SQLite >= 3.25)
+export async function PATCH(req: Request, ctx: Ctx) {
+  const g = await guard();
+  if (g) return g;
+  try {
+    const { name: raw } = await ctx.params;
+    const table = assertIdent(raw, "table");
+    const body = (await req.json().catch(() => ({}))) as {
+      action?: string;
+      column?: string;
+      newName?: string;
+    };
+    if (body.action !== "rename") return err("Unknown action. Use rename.", 400);
+    const col = assertIdent(String(body.column ?? "").trim(), "column");
+    const newName = assertIdent(String(body.newName ?? "").trim(), "new column name");
+    const db = getDb();
+    await db.execute(
+      `ALTER TABLE ${quoteIdent(table)} RENAME COLUMN ${quoteIdent(col)} TO ${quoteIdent(newName)}`
+    );
+    return NextResponse.json({ ok: true, column: newName });
+  } catch (e) {
+    return err(e, 400);
+  }
+}

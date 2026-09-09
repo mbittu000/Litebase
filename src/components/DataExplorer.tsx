@@ -11,7 +11,6 @@ import {
   Eye,
   Copy,
   Check,
-  Expand,
   ListOrdered,
   Filter as FilterIcon,
   ChevronLeft,
@@ -716,28 +715,20 @@ export default function DataExplorer({
                           <td
                             key={c}
                             onClick={() => setViewRow(r)}
-                            title="Click to view row"
-                            className={cn(
-                              "cursor-pointer px-3 py-1.5 align-top",
-                              long ? "max-w-[320px]" : "max-w-[280px] truncate"
-                            )}
+                            title={isNull ? "NULL — click to view row" : `${cellText(v).slice(0, 500)}${String(cellText(v)).length > 500 ? "…" : ""} — click to view full text`}
+                            className="max-w-[280px] cursor-pointer overflow-hidden px-3 py-2 align-middle"
                           >
                             {isNull ? (
                               <span className="rounded bg-white/[0.07] px-1.5 py-0.5 font-mono text-[10.5px] italic text-white/35">NULL</span>
-                            ) : long ? (
-                              <span className="block">
-                                <span className="line-clamp-2 break-words font-mono text-[12px] leading-[1.7] text-white/85" title={cellText(v)}>
-                                  {previewText(v)}
-                                </span>
-                                <span
-                                  title={`${String(v).length.toLocaleString()} characters — click to read the full text`}
-                                  className="mt-1 inline-flex items-center rounded-md bg-violet-500/15 p-1 text-violet-200"
-                                >
-                                  <Expand size={10} />
-                                </span>
-                              </span>
                             ) : (
-                              <span className="font-mono text-[12px] text-white/85" title={cellText(v)}>{cellText(v)}</span>
+                              <span className="block truncate whitespace-nowrap font-mono text-[12px] leading-5 text-white/85">
+                                {previewText(v)}
+                                {long && (
+                                  <span className="ml-1.5 text-[10px] text-violet-300/70">
+                                    {String(v).length > 140 ? `+${(String(v).length - 140).toLocaleString()}…` : ""}
+                                  </span>
+                                )}
+                              </span>
                             )}
                           </td>
                         );
@@ -902,6 +893,15 @@ function RowViewModal({
   const [lineSel, setLineSel] = useState<Record<string, number[]>>({});
   const [lineRange, setLineRange] = useState<Record<string, string>>({});
   const rowid = row ? String(row._rowid ?? "") : "";
+  // reset per-row UI (line picker / copy flashes) whenever a different row opens
+  useEffect(() => {
+    setCopied(false);
+    setCopiedField(null);
+    setCopiedLine(null);
+    setLineMode({});
+    setLineSel({});
+    setLineRange({});
+  }, [rowid]);
   const fields =
     columns.length > 0
       ? columns.map((c) => ({ name: c.name, type: c.type || "ANY", pk: c.pk > 0 }))
@@ -1114,7 +1114,7 @@ function RowViewModal({
                       </button>
                     </div>
                   </div>
-                  <div className="max-h-[260px] space-y-1.5 overflow-auto p-1.5">
+                  <div className="max-h-[260px] overflow-auto p-1">
                     {lines.map((ln, i) => {
                       const on = sel.includes(i);
                       const flashed = copiedLine === `${f.name}:${i}`;
@@ -1122,7 +1122,7 @@ function RowViewModal({
                         <div
                           key={i}
                           className={cn(
-                            "flex w-full items-start gap-1 rounded-lg px-1.5 py-1 transition-colors",
+                            "flex w-full items-start gap-1 rounded-md px-1.5 py-0.5 transition-colors",
                             flashed
                               ? "bg-emerald-500/[0.16]"
                               : on
@@ -1141,7 +1141,7 @@ function RowViewModal({
                               }
                             }}
                             title={flashed ? "Copied!" : `Copy line ${i + 1} — links open directly`}
-                            className="flex min-h-[30px] min-w-0 flex-1 cursor-pointer items-start gap-2 rounded-md px-1 py-1 text-left"
+                            className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 rounded px-1 py-0.5 text-left"
                           >
                             <span
                               className={cn(
@@ -1151,7 +1151,7 @@ function RowViewModal({
                             >
                               {flashed ? "✓" : i + 1}
                             </span>
-                            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-white/85">
+                            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[12px] leading-6 text-white/85">
                               {ln === "" ? (
                                 <span className="text-white/25">↵ blank</span>
                               ) : (
@@ -1184,8 +1184,8 @@ function RowViewModal({
                 <div
                   className={
                     long
-                      ? "mt-2 max-h-[320px] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/50 p-3 font-mono text-[13px] leading-[1.75] text-white/90"
-                      : "mt-1 break-words font-mono text-[12.5px] leading-relaxed text-white/85"
+                      ? "mt-2 max-h-[320px] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/50 p-3 font-mono text-[13px] leading-6 text-white/90"
+                      : "mt-1 break-words font-mono text-[12.5px] leading-6 text-white/85"
                   }
                 >
                 {isNull ? (

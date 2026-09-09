@@ -16,6 +16,7 @@ export default function StructurePanel({
 }) {
   const [addOpen, setAddOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [renameCol, setRenameCol] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ title: string; message: string; label: string; run: () => Promise<void> } | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
@@ -59,7 +60,7 @@ export default function StructurePanel({
                 <th className="px-3 py-2">PK</th>
                 <th className="px-3 py-2">Not null</th>
                 <th className="px-3 py-2">Default</th>
-                <th className="px-3 py-2 text-right">Drop</th>
+                <th className="px-3 py-2 text-right">Edit</th>
               </tr>
             </thead>
             <tbody>
@@ -70,7 +71,14 @@ export default function StructurePanel({
                   <td className="px-3 py-2">{c.pk ? <Badge tone="amber">PK{c.pk > 1 ? ` ${c.pk}` : ""}</Badge> : <span className="text-white/25">—</span>}</td>
                   <td className="px-3 py-2 text-white/70">{c.notnull ? "YES" : "—"}</td>
                   <td className="max-w-[220px] truncate px-3 py-2 font-mono text-[12px] text-white/60">{c.dflt_value ?? "—"}</td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="whitespace-nowrap px-3 py-2 text-right">
+                    <button
+                      onClick={() => setRenameCol(c.name)}
+                      className="mr-1 rounded-lg border border-white/10 p-1.5 text-white/50 hover:border-cyan-400/40 hover:text-cyan-200"
+                      title={`Rename ${c.name}`}
+                    >
+                      <Pencil size={13} />
+                    </button>
                     <button
                       onClick={() =>
                         setConfirm({
@@ -241,6 +249,17 @@ export default function StructurePanel({
           onChanged(n as never);
         }}
       />
+      <RenameColumnModal
+        key={renameCol ?? "closed"}
+        column={renameCol}
+        table={table}
+        onClose={() => setRenameCol(null)}
+        onRenamed={() => {
+          setRenameCol(null);
+          flash("Column renamed");
+          onChanged();
+        }}
+      />
       <Confirm
         open={!!confirm}
         onClose={() => setConfirm(null)}
@@ -361,6 +380,52 @@ function RenameModal({
           }}
         >
           {busy && <Spinner />} Rename
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function RenameColumnModal({
+  column,
+  table,
+  onClose,
+  onRenamed,
+}: {
+  column: string | null;
+  table: string;
+  onClose: () => void;
+  onRenamed: (newName: string) => void;
+}) {
+  const [name, setName] = useState(column ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  return (
+    <Modal open={column !== null} onClose={onClose} title={column ? `Rename column "${column}"` : "Rename column"} subtitle="Native SQLite RENAME COLUMN — data is kept as-is">
+      <Field label="New column name (letters, digits, underscore)">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. full_name" className={cn(inputCls, "font-mono")} />
+      </Field>
+      {err && <p className="mt-3 rounded-xl border border-red-400/25 bg-red-500/10 px-3 py-2 text-[13px] text-red-200">{err}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <Btn onClick={onClose}>Cancel</Btn>
+        <Btn
+          variant="primary"
+          disabled={busy || !column || !name.trim() || name.trim() === column}
+          onClick={async () => {
+            if (!column) return;
+            setBusy(true);
+            setErr("");
+            try {
+              await api.renameColumn(table, column, name.trim());
+              onRenamed(name.trim());
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy && <Spinner />} Rename column
         </Btn>
       </div>
     </Modal>
